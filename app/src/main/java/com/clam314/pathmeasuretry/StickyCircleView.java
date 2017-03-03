@@ -1,15 +1,20 @@
 package com.clam314.pathmeasuretry;
 
+import android.animation.TypeEvaluator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Point;
 import android.graphics.PointF;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.LinearInterpolator;
 
 /**
  * Created by clam314 on 2017/3/3
@@ -31,6 +36,8 @@ public class StickyCircleView extends View{
     private Paint mPaint;
     private Path mPath;
 
+    private ValueAnimator animator;
+
 
     public StickyCircleView(Context context) {
         super(context);
@@ -50,6 +57,7 @@ public class StickyCircleView extends View{
     private void initAll(){
         initCircle();
         initPaint();
+        initAnimation();
     }
 
     private void initCircle(){
@@ -74,6 +82,18 @@ public class StickyCircleView extends View{
         mPaint.setColor(circleColor);
 
         mPath = new Path();
+    }
+
+    private void initAnimation(){
+        animator = new ValueAnimator();
+        animator.setInterpolator(new LinearInterpolator());
+        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                movePoint = (PointF) animation.getAnimatedValue();
+                invalidate();
+            }
+        });
     }
 
     @Override
@@ -114,8 +134,8 @@ public class StickyCircleView extends View{
         circleStart.radius = defaultRadius * (1- scale);
         circleEnd.radius = defaultRadius * scale;
 
-        circleEnd.centerPoint.x = viewWidth/2 + movePoint.x - downPoint.x;
-        circleEnd.centerPoint.y = 50f+defaultRadius + movePoint.y - downPoint.y;
+        circleEnd.centerPoint.x = circleStart.centerPoint.x + movePoint.x - downPoint.x;
+        circleEnd.centerPoint.y = circleStart.centerPoint.y + movePoint.y - downPoint.y;
 
         Log.d(TAG,"mMoveDistance: "+ mMoveDistance+ " EndPoint: "+circleEnd.centerPoint.toString());
     }
@@ -177,6 +197,7 @@ public class StickyCircleView extends View{
             case MotionEvent.ACTION_DOWN:
                 downPoint.x = x;
                 downPoint.y = y;
+                movePoint.set(downPoint);
                 break;
             case MotionEvent.ACTION_MOVE:
                 movePoint.x = x;
@@ -185,9 +206,27 @@ public class StickyCircleView extends View{
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                animator.setObjectValues(movePoint,downPoint);
+                animator.setEvaluator(new PointEvaluator());
+                animator.setDuration(3000);
+                animator.start();
                 break;
         }
         return true;
+    }
+
+    private class PointEvaluator implements TypeEvaluator<PointF>{
+        @Override
+        public PointF evaluate(float fraction, PointF startValue, PointF endValue) {
+            float sX = endValue.x;
+            float sY = endValue.y;
+            float eX = startValue.x;
+            float eY = startValue.y;
+
+            float newEndX = eX - fraction * (eX - sX);
+            float newEndY = (newEndX - sX) * (eX - sX)/(eY - sY) + sY;
+            return new PointF(newEndX,newEndY);
+        }
     }
 
     static class Circle{
