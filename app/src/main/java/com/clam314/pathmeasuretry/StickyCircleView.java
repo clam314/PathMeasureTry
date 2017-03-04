@@ -1,5 +1,7 @@
 package com.clam314.pathmeasuretry;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.FloatEvaluator;
 import android.animation.ValueAnimator;
 import android.content.Context;
@@ -7,7 +9,9 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PathMeasure;
 import android.graphics.PointF;
+import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -20,6 +24,11 @@ import android.view.animation.AccelerateDecelerateInterpolator;
 public class StickyCircleView extends View{
     private static final String TAG = StickyCircleView.class.getSimpleName();
     private float defaultRadius = 50f;
+    private float defaultPading = 15f;
+
+    private static final long LOADING_DURATION = 2000;
+    private static final long STICKY_DURATION = 300;
+
     private float MaxMoveDistance = 1000f;
     private int viewWidth;
     private int viewHeight;
@@ -30,12 +39,17 @@ public class StickyCircleView extends View{
     private PointF downPoint,movePoint;
     private float mCircleDistance;
     private float mMoveDistance;
-    private Paint mPaint;
+    private Paint mPaint, mLoadPaint;
     private Path mPath;
+    private Path mLoadPath;
+    private PathMeasure pathMeasure;
 
-    private ValueAnimator animator;
+    private ValueAnimator stickyAnimator;
+    private ValueAnimator loadAnimator;
     private FloatEvaluator evaluator;
 
+    private float mLoadAnimatorValue;
+    private float mScale;
 
     public StickyCircleView(Context context) {
         super(context);
@@ -55,6 +69,7 @@ public class StickyCircleView extends View{
     private void initAll(){
         initCircle();
         initPaint();
+        initPath();
         initAnimation();
     }
 
@@ -79,14 +94,29 @@ public class StickyCircleView extends View{
         mPaint.setStyle(Paint.Style.FILL);
         mPaint.setColor(circleColor);
 
+        mLoadPaint = new Paint();
+        mLoadPaint.setAntiAlias(true);
+        mLoadPaint.setStrokeWidth(5);
+        mLoadPaint.setStyle(Paint.Style.STROKE);
+        mLoadPaint.setStrokeCap(Paint.Cap.ROUND);
+        mLoadPaint.setColor(Color.WHITE);
+    }
+
+    private void initPath(){
         mPath = new Path();
+
+        pathMeasure = new PathMeasure();
+        mLoadPath = new Path();
+        float radius = defaultRadius - defaultPading;
+        RectF circle = new RectF(-radius, -radius, radius, radius);
+        mLoadPath.addArc(circle, 0, 359.9f);
     }
 
     private void initAnimation(){
         evaluator = new FloatEvaluator();
-        animator = new ValueAnimator();
-        animator.setInterpolator(new AccelerateDecelerateInterpolator());
-        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+        stickyAnimator = new ValueAnimator();
+        stickyAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        stickyAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
                 float newDistance = (float) animation.getAnimatedValue();
@@ -95,6 +125,22 @@ public class StickyCircleView extends View{
                 float sin = (movePoint.y - downPoint.y)/distance;
                 movePoint.x = downPoint.x + newDistance * cos;
                 movePoint.y = downPoint.y + newDistance * sin;
+                invalidate();
+            }
+        });
+        stickyAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if(!loadAnimator.isRunning())loadAnimator.start();
+            }
+        });
+
+        loadAnimator = ValueAnimator.ofFloat(0,1).setDuration(LOADING_DURATION);
+        loadAnimator.setRepeatCount(5);
+        loadAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                mLoadAnimatorValue = (float) animation.getAnimatedValue();
                 invalidate();
             }
         });
@@ -112,15 +158,21 @@ public class StickyCircleView extends View{
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-
+        setLayerType(View.LAYER_TYPE_SOFTWARE,null);
         calculateCircleByMove();
         canvas.drawCircle(circleStart.centerPoint.x, circleStart.centerPoint.y, circleStart.radius,mPaint);
         canvas.drawCircle(circleEnd.centerPoint.x, circleEnd.centerPoint.y, circleEnd.radius,mPaint);
         if(calculateCurves(circleStart,circleEnd)){
             drawCurves(canvas);
         }
-        drawPoint(downPoint,canvas);
-        drawPoint(movePoint,canvas);
+//        drawPoint(downPoint,canvas);
+//        drawPoint(movePoint,canvas);
+        if(loadAnimator.isRunning()){
+            drawLoading(canvas);
+        }else {
+            drawLoadingNormal(canvas);
+        }
+
     }
 
     private void drawPoint(PointF point,Canvas canvas){
@@ -143,12 +195,39 @@ public class StickyCircleView extends View{
         canvas.drawPath(mPath,mPaint);
     }
 
+    private void drawLoadingNormal(Canvas canvas){
+        canvas.save();
+        canvas.translate(circleStart.centerPoint.x,circleStart.centerPoint.y);
+        canvas.scale(1 - mScale,1 - mScale);
+        canvas.rotate(360 * mScale);
+        pathMeasure.setPath(mLoadPath,false);
+        Path newPath = new Path();
+        float stop = pathMeasure.getLength() * 0.75f;
+        float start = 0;
+        pathMeasure.getSegment(start,stop,newPath,true);
+        canvas.drawPath(newPath, mLoadPaint);
+        canvas.restore();
+    }
+
+    private void drawLoading(Canvas canvas){
+        canvas.save();
+        canvas.translate(circleStart.centerPoint.x, circleStart.centerPoint.y);
+        canvas.scale(1 - mScale,1 - mScale);
+        pathMeasure.setPath(mLoadPath,false);
+        Path newPath = new Path();
+        float stop = pathMeasure.getLength() * mLoadAnimatorValue;
+        float start = (float)(stop - (0.5 - Math.abs(mLoadAnimatorValue - 0.5)) * 200f);
+        pathMeasure.getSegment(start,stop,newPath,true);
+        canvas.drawPath(newPath, mLoadPaint);
+        canvas.restore();
+    }
+
     private void calculateCircleByMove(){
         mMoveDistance = (float) Math.sqrt(Math.pow(downPoint.x - movePoint.x, 2) + Math.pow(downPoint.y - movePoint.y, 2));
         if(mMoveDistance <= 0) return;
-        float scale = mMoveDistance/MaxMoveDistance;
-        circleStart.radius = defaultRadius * (1- scale);
-        circleEnd.radius = defaultRadius * scale;
+        mScale = mMoveDistance/MaxMoveDistance;
+        circleStart.radius = defaultRadius * (1- mScale);
+        circleEnd.radius = defaultRadius * mScale;
 
         circleEnd.centerPoint.x = circleStart.centerPoint.x + movePoint.x - downPoint.x;
         circleEnd.centerPoint.y = circleStart.centerPoint.y + movePoint.y - downPoint.y;
@@ -212,7 +291,7 @@ public class StickyCircleView extends View{
                 downPoint.x = x;
                 downPoint.y = y;
                 movePoint.set(downPoint);
-                animator.cancel();
+                stickyAnimator.cancel();
                 break;
             case MotionEvent.ACTION_MOVE:
                 movePoint.x = x;
@@ -225,10 +304,10 @@ public class StickyCircleView extends View{
                 movePoint.y = y;
                 float distance = (float) Math.sqrt(Math.pow(movePoint.x - downPoint.x, 2) + Math.pow(movePoint.y - downPoint.y, 2));
                 if(distance == 0) break;
-                animator.setObjectValues(distance,0);
-                animator.setEvaluator(evaluator);
-                animator.setDuration(300);
-                animator.start();
+                stickyAnimator.setObjectValues(distance,0);
+                stickyAnimator.setEvaluator(evaluator);
+                stickyAnimator.setDuration(STICKY_DURATION);
+                stickyAnimator.start();
                 break;
         }
         return true;
