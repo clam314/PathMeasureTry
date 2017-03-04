@@ -1,20 +1,17 @@
 package com.clam314.pathmeasuretry;
 
-import android.animation.TypeEvaluator;
+import android.animation.FloatEvaluator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.Point;
 import android.graphics.PointF;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.animation.Animation;
-import android.view.animation.LinearInterpolator;
+import android.view.animation.AccelerateDecelerateInterpolator;
 
 /**
  * Created by clam314 on 2017/3/3
@@ -37,6 +34,7 @@ public class StickyCircleView extends View{
     private Path mPath;
 
     private ValueAnimator animator;
+    private FloatEvaluator evaluator;
 
 
     public StickyCircleView(Context context) {
@@ -85,12 +83,18 @@ public class StickyCircleView extends View{
     }
 
     private void initAnimation(){
+        evaluator = new FloatEvaluator();
         animator = new ValueAnimator();
-        animator.setInterpolator(new LinearInterpolator());
+        animator.setInterpolator(new AccelerateDecelerateInterpolator());
         animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
-                movePoint = (PointF) animation.getAnimatedValue();
+                float newDistance = (float) animation.getAnimatedValue();
+                float distance = (float) Math.sqrt(Math.pow(downPoint.x - movePoint.x, 2) + Math.pow(downPoint.y - movePoint.y, 2));
+                float cos = (movePoint.x - downPoint.x)/distance;
+                float sin = (movePoint.y - downPoint.y)/distance;
+                movePoint.x = downPoint.x + newDistance * cos;
+                movePoint.y = downPoint.y + newDistance * sin;
                 invalidate();
             }
         });
@@ -115,6 +119,18 @@ public class StickyCircleView extends View{
         if(calculateCurves(circleStart,circleEnd)){
             drawCurves(canvas);
         }
+        drawPoint(downPoint,canvas);
+        drawPoint(movePoint,canvas);
+    }
+
+    private void drawPoint(PointF point,Canvas canvas){
+        Paint pointPaint = new Paint();
+        pointPaint.setAntiAlias(true);
+        pointPaint.setColor(Color.RED);
+        pointPaint.setStrokeWidth(10f);
+        pointPaint.setStyle(Paint.Style.FILL);
+
+        canvas.drawPoint(point.x,point.y,pointPaint);
     }
 
     private void drawCurves(Canvas canvas){
@@ -129,15 +145,13 @@ public class StickyCircleView extends View{
 
     private void calculateCircleByMove(){
         mMoveDistance = (float) Math.sqrt(Math.pow(downPoint.x - movePoint.x, 2) + Math.pow(downPoint.y - movePoint.y, 2));
-        if(mMoveDistance == 0) return;
+        if(mMoveDistance <= 0) return;
         float scale = mMoveDistance/MaxMoveDistance;
         circleStart.radius = defaultRadius * (1- scale);
         circleEnd.radius = defaultRadius * scale;
 
         circleEnd.centerPoint.x = circleStart.centerPoint.x + movePoint.x - downPoint.x;
         circleEnd.centerPoint.y = circleStart.centerPoint.y + movePoint.y - downPoint.y;
-
-        Log.d(TAG,"mMoveDistance: "+ mMoveDistance+ " EndPoint: "+circleEnd.centerPoint.toString());
     }
 
     private boolean calculateCurves(Circle circleStart,Circle circleEnd){
@@ -198,6 +212,7 @@ public class StickyCircleView extends View{
                 downPoint.x = x;
                 downPoint.y = y;
                 movePoint.set(downPoint);
+                animator.cancel();
                 break;
             case MotionEvent.ACTION_MOVE:
                 movePoint.x = x;
@@ -206,27 +221,17 @@ public class StickyCircleView extends View{
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                animator.setObjectValues(movePoint,downPoint);
-                animator.setEvaluator(new PointEvaluator());
-                animator.setDuration(3000);
+                movePoint.x = x;
+                movePoint.y = y;
+                float distance = (float) Math.sqrt(Math.pow(movePoint.x - downPoint.x, 2) + Math.pow(movePoint.y - downPoint.y, 2));
+                if(distance == 0) break;
+                animator.setObjectValues(distance,0);
+                animator.setEvaluator(evaluator);
+                animator.setDuration(300);
                 animator.start();
                 break;
         }
         return true;
-    }
-
-    private class PointEvaluator implements TypeEvaluator<PointF>{
-        @Override
-        public PointF evaluate(float fraction, PointF startValue, PointF endValue) {
-            float sX = endValue.x;
-            float sY = endValue.y;
-            float eX = startValue.x;
-            float eY = startValue.y;
-
-            float newEndX = eX - fraction * (eX - sX);
-            float newEndY = (newEndX - sX) * (eX - sX)/(eY - sY) + sY;
-            return new PointF(newEndX,newEndY);
-        }
     }
 
     static class Circle{
