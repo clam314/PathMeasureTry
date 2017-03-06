@@ -23,38 +23,33 @@ import android.view.animation.AccelerateDecelerateInterpolator;
  */
 
 public class StickyCircleView extends View{
-    private static final String TAG = StickyCircleView.class.getSimpleName();
-    private final static float defaultRadius = 50f;
-    private final static float defaultPadding = 15f;
+    private final static float DEFAULT_RADIUS = 50f;
+    private final static float DEFAULT_PADDING = 20f;
 
     private static final long LOADING_DURATION = 2000;
     private static final long STICKY_DURATION = 300;
 
+    //移动的最大距离
     private float MaxMoveDistance = 1000f;
-    private int viewWidth;
-    private int viewHeight;
-    private static final int circleColor = Color.parseColor("#00ffad");
+    private int viewWidth,viewHeight;
+    private int circleColor = Color.parseColor("#00ffad");
+    private int loadPathColor = Color.WHITE;
 
     private Circle circleStart, circleEnd;
     private PointF pStartA,pStartB,pEndA,pEndB,pControlO, pControlP;
     private PointF downPoint,movePoint;
-    private float mCircleDistance;
-    private float mMoveDistance;
-    private float loadCircleRadius;
-    private Paint mPaint, mLoadPaint;
-    private Path mPath;
-    private Path mLoadPath;
+
+    private Paint mBezierPaint, mLoadPaint;
+    private Path mBezierPath,mLoadPath;
     private PathMeasure pathMeasure;
 
-    private ValueAnimator stickyAnimator;
-    private ValueAnimator loadAnimator;
+    private ValueAnimator stickyAnimator,loadAnimator;
     private FloatEvaluator evaluator;
 
     private float mLoadAnimatorValue;
     private float mScale;
 
     private boolean loading = false;
-    private boolean needStickeyAdmin = true;
     private OnReloadListener mReloadListener;
 
     public StickyCircleView(Context context) {
@@ -73,15 +68,15 @@ public class StickyCircleView extends View{
     }
 
     private void initAll(){
-        initCircle();
+        initCircleAndPoints();
         initPaint();
         initPath();
         initAnimation();
     }
 
-    private void initCircle(){
-        circleStart = new Circle(0,0,defaultRadius);
-        circleEnd = new Circle(0,0,defaultRadius);
+    private void initCircleAndPoints(){
+        circleStart = new Circle(0,0, DEFAULT_RADIUS);
+        circleEnd = new Circle(0,0, DEFAULT_RADIUS);
 
         pStartA = new PointF();
         pStartB = new PointF();
@@ -94,26 +89,26 @@ public class StickyCircleView extends View{
     }
 
     private void initPaint(){
-        mPaint = new Paint();
-        mPaint.setAntiAlias(true);
-        mPaint.setStrokeWidth(1);
-        mPaint.setStyle(Paint.Style.FILL);
-        mPaint.setColor(circleColor);
+        mBezierPaint = new Paint();
+        mBezierPaint.setAntiAlias(true);
+        mBezierPaint.setStrokeWidth(1);
+        mBezierPaint.setStyle(Paint.Style.FILL);
+        mBezierPaint.setColor(circleColor);
 
         mLoadPaint = new Paint();
         mLoadPaint.setAntiAlias(true);
         mLoadPaint.setStrokeWidth(5);
         mLoadPaint.setStyle(Paint.Style.STROKE);
         mLoadPaint.setStrokeCap(Paint.Cap.ROUND);
-        mLoadPaint.setColor(Color.WHITE);
+        mLoadPaint.setColor(loadPathColor);
     }
 
     private void initPath(){
-        mPath = new Path();
+        mBezierPath = new Path();
 
         pathMeasure = new PathMeasure();
         mLoadPath = new Path();
-        loadCircleRadius = defaultRadius - defaultPadding;
+        float loadCircleRadius = DEFAULT_RADIUS - DEFAULT_PADDING;
         RectF circle = new RectF(-loadCircleRadius, -loadCircleRadius, loadCircleRadius, loadCircleRadius);
         mLoadPath.addArc(circle, 0, 359.9f);
     }
@@ -175,73 +170,77 @@ public class StickyCircleView extends View{
         viewWidth = w;
         viewHeight = h;
         circleEnd.centerPoint.x = circleStart.centerPoint.x = viewWidth/2;
-        circleEnd.centerPoint.y = circleStart.centerPoint.y = 50f + defaultRadius;
+        circleEnd.centerPoint.y = circleStart.centerPoint.y = 50f + DEFAULT_RADIUS;
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+
+        //关闭硬件加速，否则部分path的绘制不生效
         setLayerType(View.LAYER_TYPE_SOFTWARE,null);
-        calculateCircleByMove();
-        canvas.drawCircle(circleStart.centerPoint.x, circleStart.centerPoint.y, circleStart.radius,mPaint);
-        canvas.drawCircle(circleEnd.centerPoint.x, circleEnd.centerPoint.y, circleEnd.radius,mPaint);
-        if(calculateCurves(circleStart,circleEnd)){
-            drawCurves(canvas);
+
+        //根据按下的和滑动的点两个点的距离计算，开始圆和拉出圆的中心坐标以及半径
+        calculateCircleSize();
+
+        canvas.drawCircle(circleStart.centerPoint.x, circleStart.centerPoint.y, circleStart.radius, mBezierPaint);
+        canvas.drawCircle(circleEnd.centerPoint.x, circleEnd.centerPoint.y, circleEnd.radius, mBezierPaint);
+
+        if(calculateBezierCurve(circleStart,circleEnd)){
+            drawBezierCurves(canvas);//绘制两圆间的贝塞尔曲线
         }
-//        drawPoint(downPoint,canvas);
-//        drawPoint(movePoint,canvas);
+
+
         if(loadAnimator.isRunning()){
-            drawLoading(canvas);
+            drawLoading(canvas);//绘制旋转时，中心的圆弧
         }else {
-            drawLoadingNormal(canvas);
+            drawLoadingNormal(canvas);//绘制中心的圆弧和箭头
         }
 
     }
 
-    private void drawPoint(PointF point,Canvas canvas){
-        Paint pointPaint = new Paint();
-        pointPaint.setAntiAlias(true);
-        pointPaint.setColor(Color.RED);
-        pointPaint.setStrokeWidth(10f);
-        pointPaint.setStyle(Paint.Style.FILL);
-
-        canvas.drawPoint(point.x,point.y,pointPaint);
-    }
-
-    private void drawCurves(Canvas canvas){
-        mPath.reset();
-        mPath.moveTo(pStartA.x,pStartA.y);
-        mPath.quadTo(pControlO.x, pControlO.y, pEndA.x, pEndA.y);
-        mPath.lineTo(pEndB.x, pEndB.y);
-        mPath.quadTo(pControlP.x, pControlP.y, pStartB.x, pStartB.y);
-        mPath.close();
-        canvas.drawPath(mPath,mPaint);
+    private void drawBezierCurves(Canvas canvas){
+        mBezierPath.reset();
+        mBezierPath.moveTo(pStartA.x,pStartA.y);
+        mBezierPath.quadTo(pControlO.x, pControlO.y, pEndA.x, pEndA.y);
+        mBezierPath.lineTo(pEndB.x, pEndB.y);
+        mBezierPath.quadTo(pControlP.x, pControlP.y, pStartB.x, pStartB.y);
+        mBezierPath.close();
+        canvas.drawPath(mBezierPath, mBezierPaint);
     }
 
     private void drawLoadingNormal(Canvas canvas){
+        //这里包含对画布坐标系的转换，快照一下，防止对影响后续绘制
         canvas.save();
+        //将画布中心移到开始圆的中心
         canvas.translate(circleStart.centerPoint.x,circleStart.centerPoint.y);
+        //根据移动的距离比例，对画布缩小和旋转
         canvas.scale(1 - mScale,1 - mScale);
         canvas.rotate(360 * mScale);
-        pathMeasure.setPath(mLoadPath,false);
 
+        pathMeasure.setPath(mLoadPath,false);//将中心圆圈的path和pathMeasure关联
         float[] pos = new float[2];
         float[] tan = new float[2];
         float stop = pathMeasure.getLength() * 0.75f;
         float start = 0;
-        pathMeasure.getPosTan(stop,pos,tan);
+        pathMeasure.getPosTan(stop,pos,tan);//获取截取圆弧的结束点的坐标和方向趋势
+        //根据tan获取旋转的角度，用于旋转后面绘制的箭头
         float degrees =(float)(Math.atan2(tan[1],tan[0])*180/Math.PI);
 
         Matrix matrix = new Matrix();
         Path triangle = new Path();
+        //绘制箭头，此时的箭头的顶点坐标还在原点
         triangle.moveTo(pos[0] - 5, pos[1] + 5);
         triangle.lineTo(pos[0],pos[1]);
         triangle.lineTo(pos[0] + 5, pos[1] + 5);
         triangle.close();
+        //将箭头移动到圆弧结束点的位置并旋转
         matrix.setRotate(degrees+90, pos[0],pos[1]);
 
         Path showPath = new Path();
+        //前面的箭头添加将要绘制的路径里面
         showPath.addPath(triangle,matrix);
+        //截取圆圈从起始点到结束的圆弧并添加到要绘制的path中，true代表不将截取的圆弧的起点移动到之前path的最后一个点上
         pathMeasure.getSegment(start,stop,showPath,true);
 
         canvas.drawPath(showPath, mLoadPaint);
@@ -249,6 +248,7 @@ public class StickyCircleView extends View{
     }
 
     private void drawLoading(Canvas canvas){
+        //基本和绘制一般状态的时候一样，除了截取的起点和终点需要动态的计算
         canvas.save();
         canvas.translate(circleStart.centerPoint.x, circleStart.centerPoint.y);
         canvas.scale(1 - mScale,1 - mScale);
@@ -261,18 +261,22 @@ public class StickyCircleView extends View{
         canvas.restore();
     }
 
-    private void calculateCircleByMove(){
-        mMoveDistance = getDistanceBetweenTwoPoints(downPoint.x,downPoint.y,movePoint.x,movePoint.y);
+    private void calculateCircleSize(){
+        float mMoveDistance = getDistanceBetweenTwoPoints(downPoint.x,downPoint.y,movePoint.x,movePoint.y);
+        //两圆重合无需再计算
         if(mMoveDistance <= 0) return;
         mScale = mMoveDistance/MaxMoveDistance;
-        circleStart.radius = defaultRadius * (1- mScale);
-        circleEnd.radius = defaultRadius * mScale;
+        //开始圆按比例缩小
+        circleStart.radius = DEFAULT_RADIUS * (1- mScale);
+        //拉出圆按比例放大
+        circleEnd.radius = DEFAULT_RADIUS * mScale;
 
+        //开始圆的位置不变，拉出圆的位置根据滑动的距离移动
         circleEnd.centerPoint.x = circleStart.centerPoint.x + movePoint.x - downPoint.x;
         circleEnd.centerPoint.y = circleStart.centerPoint.y + movePoint.y - downPoint.y;
     }
 
-    private boolean calculateCurves(Circle circleStart,Circle circleEnd){
+    private boolean calculateBezierCurve(Circle circleStart, Circle circleEnd){
         float startRadius = circleStart.radius;
         float endRadius = circleEnd.radius;
         float startX = circleStart.centerPoint.x;
@@ -280,7 +284,8 @@ public class StickyCircleView extends View{
         float endX= circleEnd.centerPoint.x;
         float endY = circleEnd.centerPoint.y;
 
-        mCircleDistance = getDistanceBetweenTwoPoints(startX,startY,endX,endY);
+        float mCircleDistance = getDistanceBetweenTwoPoints(startX,startY,endX,endY);
+        //两个圆重合就无需要绘制连接曲线
         if(mCircleDistance == 0){
             return false;
         }
@@ -329,6 +334,7 @@ public class StickyCircleView extends View{
     public boolean onTouchEvent(MotionEvent event) {
         float x = event.getX();
         float y = event.getY();
+        //动画执行时，无需改变两点的坐标
         switch (event.getAction()){
             case MotionEvent.ACTION_DOWN:
                 if(!stickyAnimator.isRunning() && !loadAnimator.isRunning()){
@@ -339,10 +345,11 @@ public class StickyCircleView extends View{
                 }
                 break;
             case MotionEvent.ACTION_MOVE:
-                if(!stickyAnimator.isRunning() && !loadAnimator.isRunning()){
+                if(!stickyAnimator.isRunning() && !loadAnimator.isRunning() && !loading){
                     movePoint.x = x;
                     movePoint.y = y;
                     float distanceMove = getDistanceBetweenTwoPoints(downPoint.x,downPoint.y,movePoint.x,movePoint.y);
+                    //滑动距离在动作范围内，则开始执行回滚动画和loading动画
                     if(inLoadArea(distanceMove)){
                         loading = true;
                         executeAnimator(distanceMove);
@@ -352,10 +359,11 @@ public class StickyCircleView extends View{
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                if(!stickyAnimator.isRunning() && !loadAnimator.isRunning()){
+                if(!stickyAnimator.isRunning() && !loadAnimator.isRunning() && !loading){
                     movePoint.x = x;
                     movePoint.y = y;
                     float distanceUp = getDistanceBetweenTwoPoints(downPoint.x,downPoint.y,movePoint.x,movePoint.y);
+                    //滑动距离在动作范围内，则开始执行回滚动画和loading动画，否则只开始回滚动画
                     if(inLoadArea(distanceUp)){
                        loading = true;
                     }
@@ -375,6 +383,7 @@ public class StickyCircleView extends View{
     }
 
     private void executeAnimator(float distance){
+        //两个圆重合时无需回滚
         if(distance == 0) return;
         stickyAnimator.setObjectValues(distance,0);
         stickyAnimator.setEvaluator(evaluator);
