@@ -114,9 +114,12 @@ public class StickyCircleView extends View{
     }
 
     private void initAnimation(){
+        //这里先不给animator设置evaluator,因为暂时还不知道需要变化的值，此时设置了也无效
         evaluator = new FloatEvaluator();
         stickyAnimator = new ValueAnimator();
+        //设置插值器
         stickyAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        //设置属性值变化的监听，这里得到的newDistance就是两点新的距离
         stickyAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
@@ -129,9 +132,11 @@ public class StickyCircleView extends View{
                 invalidate();
             }
         });
+        //圆形缩回来后判断是否需要执行loading动画
         stickyAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
+                //在onTouchEvent里面判断了移动的距离是否触发加载动画
                 if(loading){
                     loadAnimator.start();
                     if(mReloadListener != null) mReloadListener.onReload();
@@ -140,7 +145,7 @@ public class StickyCircleView extends View{
         });
 
         loadAnimator = ValueAnimator.ofFloat(0,1).setDuration(LOADING_DURATION);
-        loadAnimator.setRepeatCount(5);
+        loadAnimator.setRepeatCount(-1);//loading动画一直执行，直到调用cancel()后才停止
         loadAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
@@ -182,7 +187,6 @@ public class StickyCircleView extends View{
 
         //根据按下的和滑动的点两个点的距离计算，开始圆和拉出圆的中心坐标以及半径
         calculateCircleSize();
-
         canvas.drawCircle(circleStart.centerPoint.x, circleStart.centerPoint.y, circleStart.radius, mBezierPaint);
         canvas.drawCircle(circleEnd.centerPoint.x, circleEnd.centerPoint.y, circleEnd.radius, mBezierPaint);
 
@@ -190,13 +194,11 @@ public class StickyCircleView extends View{
             drawBezierCurves(canvas);//绘制两圆间的贝塞尔曲线
         }
 
-
         if(loadAnimator.isRunning()){
             drawLoading(canvas);//绘制旋转时，中心的圆弧
         }else {
             drawLoadingNormal(canvas);//绘制中心的圆弧和箭头
         }
-
     }
 
     private void drawBezierCurves(Canvas canvas){
@@ -210,7 +212,7 @@ public class StickyCircleView extends View{
     }
 
     private void drawLoadingNormal(Canvas canvas){
-        //这里包含对画布坐标系的转换，快照一下，防止对影响后续绘制
+        //这里包含对画布坐标系的转换，快照一下，防止影响后续绘制
         canvas.save();
         //将画布中心移到开始圆的中心
         canvas.translate(circleStart.centerPoint.x,circleStart.centerPoint.y);
